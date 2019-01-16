@@ -30,8 +30,8 @@ object Part2 extends App {
 
     final case class Id(value: String) extends AnyVal
 
-    implicit def Show(implicit transactionShow: Show[List[Transaction]]) = new Show[Account] {
-      override def show(a: Account) = transactionShow.show(a.transactions)
+    implicit def Show(implicit transactionShow: Show[Transaction]) = new Show[Account] {
+      override def show(a: Account) = a.transactions.map(transactionShow.show).mkString("\n")
     }
 
   }
@@ -130,16 +130,11 @@ object Part2 extends App {
       account.copy(transactions = transaction :: account.transactions)
     }
 
-    def categorize(account: Account)(id: Transaction.Id, category: Category): Account = {
-
-      def replaceTransaction(transactions: List[Transaction])(id: Transaction.Id, category: Category): List[Transaction] = transactions match {
-        case Transaction(i, a, d, _) :: ts if i == id => Transaction(id, a, d, Some(category)) :: ts
-        case t :: ts => t :: replaceTransaction(ts)(id, category)
-        case Nil => Nil
-      }
-
-      account.copy(transactions = replaceTransaction(account.transactions)(id, category))
-    }
+    def categorize(account: Account)(id: Transaction.Id, category: Category): Account =
+      account.copy(transactions = account.transactions.map {
+        case Transaction(`id`, a, d, _) => Transaction(id, a, d, Some(category))
+        case transaction => transaction
+      })
   }
 
   // 2.3 Use the api that you just created.
@@ -147,22 +142,22 @@ object Part2 extends App {
   val account = Account()
 
   // - Add a transaction with id 1 of amount -13 (and any date)
-  val a = Api.addTransaction(account)(Id("1"), -13)
+  val one = Api.addTransaction(account)(Id("1"), -13)
   // - Add a transaction with id 2 of amount -50 (and any date)
-  val b = Api.addTransaction(a)(Id("2"), -50)
+  val two = Api.addTransaction(one)(Id("2"), -50)
   // - Add a check payment with id 3 of amount 650 (and any date)
-  val c = Api.addCategorizedTransaction(b)(Id("3"), 650, Category.Payment)
+  val three = Api.addCategorizedTransaction(two)(Id("3"), 650, Category.Payment)
   // - Categorize the second transaction (id "2") as a withdrawal
-  val d = Api.categorize(c)(Id("2"), Withdrawal)
+  val four = Api.categorize(three)(Id("2"), Withdrawal)
   // - (Re)categorize the third transaction (id "3") as check deposit
-  val e = Api.categorize(d)(Id("3"), Deposit)
+  val five = Api.categorize(four)(Id("3"), Deposit)
   //
   // help: After the above operations the bank account should hold:
   // TransactionId(1) -> (Transaction(1, -13, date), None)
   // TransactionId(2) -> (Transaction(2, -50, date), Some(Withdrawal))
   // TransactionId(3) -> (Transaction(3, 650, date), Some(CheckDeposit)
 
-  println(e.transactions) // List(
+  println(five.transactions) // List(
   //  Transaction(Id(3),650.0,2019-01-16T00:12:53.948,Some(Deposit)),
   //  Transaction(Id(2),-50.0,2019-01-16T00:12:53.947,Some(Withdrawal)),
   //  Transaction(Id(1),-13.0,2019-01-16T00:12:53.944,None)
@@ -185,14 +180,12 @@ object Part2 extends App {
     def show(a: A): String
   }
 
-  implicit def ListShow[A](implicit ev: Show[A]): Show[List[A]] = (l: List[A]) => l.map(ev.show).mkString("\n")
-
   def export[A: Show](a: A) = implicitly[Show[A]].show(a)
 
   // 3,check-deposit,650.0,1547598768128
   // 2,withdrawal,-50.0,1547598768127
   // 1,,-13.0,1547598768123
-  println(export(e))
+  println(export(five))
 
   // 2.5 CSV Import
   // Users want to be able to import transactions from a CSV.
@@ -210,9 +203,9 @@ object Part2 extends App {
 
   def accountImport(s: String): Try[List[Transaction]] = {
 
-    def reverse[A](l: List[Try[A]]): Try[List[A]] =
+    def swap[A](l: List[Try[A]]): Try[List[A]] =
       l match {
-        case Success(v) :: xs => reverse(xs).map(x => v :: x)
+        case Success(v) :: xs => swap(xs).map(x => v :: x)
         case Failure(e) :: _ => Failure(e)
         case Nil => Success(Nil)
       }
@@ -230,7 +223,7 @@ object Part2 extends App {
       }
     }
 
-    reverse(s.split("\n").toList.map(parseTransaction))
+    swap(s.split("\n").toList.map(parseTransaction))
   }
 
   println(accountImport(",invalid type,invalid amount,invalid date")) // Failure(java.lang.RuntimeException: Invalid Id)
@@ -245,25 +238,23 @@ object Part2 extends App {
   // - Compute the account balance
   object Analysis {
 
-    def sumIncomes(account: Account) =
+    def sumIncomes(account: Account): Double =
       account
         .transactions
         .filter(t => t.category.exists(Category.Incomes.contains) || (t.category.isEmpty && t.amount > 0))
         .map(_.amount)
         .sum
 
-    def listChecks(account: Account) =
+    def listChecks(account: Account): List[Transaction] =
       account
         .transactions
         .filter(t => t.category.exists(Category.Checks.contains))
 
-    def balance(account: Account) = account.transactions.foldLeft(.0) {
-      case (balance, transaction) => balance + transaction.amount
-    }
+    def balance(account: Account): Double = account.transactions.map(_.amount).sum
   }
 
-  println(Analysis.sumIncomes(d)) // 650.0
-  println(Analysis.listChecks(d)) // List(Transaction(Id(3),650.0,2019-01-16T00:45:38.899,Some(Payment)))
-  println(Analysis.balance(d)) // 587.0
+  println(Analysis.sumIncomes(four)) // 650.0
+  println(Analysis.listChecks(four)) // List(Transaction(Id(3),650.0,2019-01-16T00:45:38.899,Some(Payment)))
+  println(Analysis.balance(four)) // 587.0
 
 }
